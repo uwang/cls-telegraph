@@ -1,0 +1,22 @@
+services:
+  archive:
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      TZ: Asia/Shanghai
+      ARCHIVE_TIME: "${ARCHIVE_TIME:-00:10}"
+      OUTPUT_DIR: /data
+      BARK_PUSH_TIME: "${BARK_PUSH_TIME:-08:00}"
+      BARK_URL: "${BARK_URL:-https://api.day.app}"
+      BARK_DEVICE_KEYS: "${BARK_DEVICE_KEYS:-}"
+      FETCH_RETRIES: "${FETCH_RETRIES:-10}"
+      ARCHIVE_RETRY_SECONDS: "${ARCHIVE_RETRY_SECONDS:-300}"
+      BARK_RETRY_SECONDS: "${BARK_RETRY_SECONDS:-900}"
+    volumes:
+      - ${ARCHIVE_OUTPUT_DIR:-/Users/bing/workspace/economic-crisis/raw/telegram}:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -191,6 +191,17 @@ MIT
 
 ## Docker 每日归档
 
+本地一键构建、启动并查看日志：
+
+```bash
+./run-local.sh
+```
+
+脚本自动检查 Docker，缺少 `.env` 时从 `.env.example` 创建配置。
+填写 Bark 设备 key 后再次运行即可应用配置。按 Ctrl+C 仅退出日志，容器继续运行。
+
+也可以手动运行：
+
 ```bash
 docker compose up -d --build
 docker compose logs -f archive
@@ -199,7 +210,8 @@ docker compose logs -f archive
 默认北京时间（`Asia/Shanghai`）每天 **00:10** 归档前一天完整电报，保存到宿主机
 `/Users/bing/workspace/economic-crisis/raw/telegram/YYYY/MM/YYYY-MM-DD.md`。
 首次启动如果已过执行时间，立即归档昨天；否则等到 00:10。
-成功日期记录在输出目录的 `.archive-last-success`，重启后从该日期逐日补档。
+成功日期与运行记录保存在输出目录的 `archive.sqlite3`，重启后从成功日期逐日补档。
+旧版本的 `.archive-last-success` 在首次升级时自动导入，之后以数据库为准。
 首次启动仅归档昨天，不自动扫描更早历史。失败每 5 分钟重试，单次任务最长 1 小时；
 下载成功后才替换目标文件。日志可通过 Compose 查看，Docker 会轮转日志。
 请保持 Docker 运行且电脑不休眠；停机期间不能执行，恢复后会依据成功记录补档。
@@ -221,3 +233,64 @@ docker compose run --rm archive --archive --date 2026-08-30 --output-dir /data
 ```
 
 其他 CLI 参数也可直接使用，例如 `docker compose run --rm archive -h`。
+
+### Bark 通知与记录
+
+复制 `.env.example` 为 `.env`，填写自己的设备 key（多个设备用逗号分隔）：
+
+```dotenv
+BARK_URL=https://api.day.app
+BARK_DEVICE_KEYS=your-device-key
+```
+
+`BARK_URL` 只填服务基础地址，不包含设备 key 或 `/push`。运行
+`docker compose up -d --build` 应用配置。未配置设备时继续归档，通知记录为 `disabled`；
+以后启用 Bark 不补发这些已跳过的历史通知。
+
+凌晨归档后只记录结果并将通知入队，**北京时间每天 08:00 起**发送待发 Bark 通知，
+内容包含日期、条数、文件大小和容器内路径，分组为 `cls.archive`。
+可用 `BARK_PUSH_TIME=08:00` 调整时间。成功、失败告警及重试均不会在当天该时间之前发送；
+08:00 后完成的归档或恢复运行的服务会及时补发，仍沿用原有失败重试间隔。
+同一归档日期首次失败时创建一条失败告警，后续失败只追加运行记录；恢复成功后创建成功通知，
+尚未送达的失败告警标记为 `superseded`，避免恢复后再收到过期告警。
+
+查看最近各 20 条归档、通知、设备状态和推送尝试：
+
+```bash
+docker compose run --rm archive --status
+docker compose logs --tail=100 archive
+```
+
+完整记录在宿主机输出目录下的 `archive.sqlite3`，可用 SQLite 查看：
+
+| 表 | 内容 |
+| --- | --- |
+| `archive_log` | 每次归档日期、开始/结束时间、状态、文件路径、字节数、条数、错误类型 |
+| `notifications` | 通知内容与整体状态：pending/success/disabled/superseded |
+| `deliveries` | 每台设备的送达状态与下次重试时间 |
+| `push_log` | 每次 HTTP 推送的时间、耗时、结果、错误类型或 HTTP 状态码 |
+| `meta` | 最后成功归档日期 |
+
+时间字段使用 Unix 秒。设备在记录中只保存 SHA-256 标识，不保存完整 key；
+网络错误只存异常类别，不写入可能含密钥的响应正文或异常文本。
+任务被中断后，其 `running` 记录在重启时标记为 `interrupted`，随后重新归档。
+归档完成与通知入队在同一数据库事务中提交，推送失败不回退归档进度。
+同一输出目录通过文件锁限制为一个调度进程。
+
+### 弱网重试
+
+- v1 抓取每页默认最多尝试 `FETCH_RETRIES=10` 次，失败后随机等待 2–4 秒，
+  重试当前分页游标；连接/读取超时分别为 5/15 秒。网络、JSON 或字段异常重试，合法空页正常结束。
+- 整日归档失败默认 `ARCHIVE_RETRY_SECONDS=300` 秒后重试，单次归档最长一小时。
+  下载完成后原子替换 Markdown；失败不会覆盖原有文件。
+- Bark 使用复用连接的 Session，POST JSON 到 `/push`，连接/读取超时分别为 5/15 秒。
+  每台设备每轮最多尝试 4 次，退避区间为 2–4、6–10、15–25 秒。
+  必须 HTTP 200 且 JSON `code == 200` 才记录成功。
+- Bark 当轮仍失败，默认 `BARK_RETRY_SECONDS=900` 秒后补发；每次尝试持久化记录。
+  重启后只补发未成功设备。通知创建时固定设备集合，新增设备不接收旧通知；
+  移除的设备保留待发状态，恢复配置后可继续补发。
+- Bark 服务已接收但响应丢失时，重试可能产生重复通知；这是远端送达确认的不确定性。
+  归档与推送在单进程中串行运行，长时间归档会延后待发通知。
+
+以上运行记录和 Bark 通知适用于每日调度服务。直接传 CLI 参数的手动命令仍是单次下载，
+不写入调度数据库、不发送 Bark，也不改变自动补档进度。

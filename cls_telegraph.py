@@ -6,6 +6,7 @@ import curses
 import hashlib
 import json
 import os
+import random
 import sys
 import time as _time
 import unicodedata
@@ -90,12 +91,30 @@ def fetch_v1(last_time=None, count=20, category=""):
         "category": category,
     }
     params["sign"] = _make_sign(params)
-    resp = requests.get(API_V1_URL, params=params, headers=HEADERS, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("errno") not in (None, 0, "0"):
-        raise RuntimeError(f"API 返回错误: {data}")
-    return data.get("data", {}).get("roll_data", [])
+    attempts = max(1, int(os.environ.get("FETCH_RETRIES", "10")))
+    for attempt in range(attempts):
+        try:
+            resp = requests.get(API_V1_URL, params=params, headers=HEADERS, timeout=(5, 15))
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict) or data.get("errno") not in (None, 0, "0"):
+                raise ValueError("API 业务状态错误")
+            payload = data.get("data")
+            if not isinstance(payload, dict) or not isinstance(payload.get("roll_data"), list):
+                raise ValueError("API 缺少 roll_data 数组")
+            items = payload["roll_data"]
+            if any(not isinstance(item, dict) or "id" not in item
+                   or not isinstance(item.get("ctime"), (int, float)) for item in items):
+                raise ValueError("API 电报字段不完整")
+            return items  # 合法空页表示历史结束，不能作为网络故障重试。
+        except (requests.RequestException, ValueError) as exc:
+            if attempt + 1 == attempts:
+                raise
+            delay = random.uniform(2, 4)
+            print(f"获取电报失败 ({type(exc).__name__})，{delay:.1f}s 后重试 "
+                  f"({attempt + 2}/{attempts})", file=sys.stderr)
+            _time.sleep(delay)
+
 
 
 def fetch_telegraph_nodeapi(count=20):
