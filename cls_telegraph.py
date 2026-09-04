@@ -5,6 +5,7 @@ import argparse
 import curses
 import hashlib
 import json
+import os
 import sys
 import time as _time
 import unicodedata
@@ -78,7 +79,7 @@ def _make_sign(params):
 
 def fetch_v1(last_time=None, count=20, category=""):
     """通过 v1 API 获取电报列表（支持深度分页）"""
-    ts = last_time or int(_time.time())
+    ts = int(_time.time()) if last_time is None else last_time
     params = {
         "app": "CailianpressWeb",
         "os": "web",
@@ -175,7 +176,7 @@ def format_terminal(items, show_stock=True, content_limit=1000):
 
         print(f"{color}[{format_time(ctime)}] [{level}] {title}{reset}")
 
-        if content and content != title and not title.startswith(content[:20]):
+        if content and content != title:
             display = content[:content_limit] + ("..." if len(content) > content_limit else "")
             print(f"  {display}")
 
@@ -200,6 +201,57 @@ def format_terminal(items, show_stock=True, content_limit=1000):
 
 def format_json(items):
     print(json.dumps(items, ensure_ascii=False, indent=2))
+
+
+def format_markdown(items, date_str, show_stock=True, plain=False):
+    """渲染为 Markdown 文本（下载模式用，按时间正序）
+
+    plain=True 时为纯文本风格：无标签、无股票、无等级标记
+    """
+    items = sorted(items, key=lambda i: i.get("ctime", 0))
+    out = [f"# 财联社电报 {date_str}", "", f"> 共 {len(items)} 条", ""]
+
+    for item in items:
+        ctime = item.get("ctime", 0)
+        level = item.get("level", "C")
+        title = (item.get("title") or "").strip()
+        content = (item.get("content") or "").strip()
+        heading = title or content
+        plain_heading = heading
+        if not plain and level == "A":
+            heading = f"**{heading}**"
+        if plain:
+            out.append(f"## {format_time_short(ctime)} {heading}")
+        else:
+            out.append(f"## {format_time_short(ctime)} [{level}] {heading}")
+        out.append("")
+
+        if content and content != plain_heading:
+            out.append(content)
+            out.append("")
+
+        if not plain:
+            if show_stock and item.get("stock_list"):
+                stocks = []
+                for s in item["stock_list"]:
+                    name = s.get("name", "")
+                    sid = s.get("StockID", "")
+                    rise = s.get("RiseRange")
+                    rise_str = f" {rise:+.2f}%" if rise is not None else ""
+                    stocks.append(f"{name}({sid}){rise_str}")
+                out.append(f"- 📈 {' | '.join(stocks)}")
+
+            subjects = item.get("subjects") or []
+            tags = [s.get("subject_name", "") for s in subjects if s.get("subject_name")]
+            if tags:
+                out.append(f"- 🏷️ {', '.join(tags)}")
+
+        if out[-1] != "":
+            out.append("")
+        out.append("---")
+        out.append("")
+
+    return "\n".join(out).rstrip() + "\n"
 
 
 # ── curses live 渲染 ─────────────────────────────────────
@@ -243,7 +295,7 @@ def render_item_lines(item, width, content_limit=1000):
             lines.append((tag, line))
 
     # 内容（如果和标题不同）
-    if content and title and content != title and not title.startswith(content[:20]):
+    if content and title and content != title:
         display = content[:content_limit] + ("..." if len(content) > content_limit else "")
         for line in cjk_wrap(display, width - 1,
                              initial_indent=indent,
@@ -310,6 +362,8 @@ def live_monitor(filter_args, interval=15, content_limit=1000):
         first_load = True
         new_ids = set()
         loading_history = False
+        history_cursor = None
+        history_exhausted = False
         error_msg = ""
         search_keyword = ""
         search_matches = []
@@ -332,8 +386,17 @@ def live_monitor(filter_args, interval=15, content_limit=1000):
 
         def refresh_data():
             nonlocal all_items, seen_ids, display_lines, last_fetch, first_load, new_ids, error_msg
+            nonlocal history_cursor
             try:
-                raw = fetch_telegraph_nodeapi(count=20)
+                category = filter_args.get("category", "")
+                before = filter_args.get("before")
+                if category or before is not None:
+                    raw = fetch_v1(last_time=before + 1 if before is not None else None,
+                                   count=20, category=category)
+                else:
+                    raw = fetch_telegraph_nodeapi(count=20)
+                if history_cursor is None and raw:
+                    history_cursor = min(it["ctime"] for it in raw)
                 fetched = do_filter(raw)
                 new_ids = set()
                 for it in fetched:
@@ -361,13 +424,26 @@ def live_monitor(filter_args, interval=15, content_limit=1000):
         def load_history():
             """翻到底部时加载更多历史数据（使用 v1 API 支持深度分页）"""
             nonlocal all_items, seen_ids, loading_history, error_msg
-            if loading_history or not all_items:
+            nonlocal history_cursor, history_exhausted
+            if loading_history or history_exhausted:
                 return
             loading_history = True
             try:
-                oldest_ctime = min(it.get("ctime", 0) for it in all_items)
-                raw = fetch_v1(last_time=oldest_ctime, count=50,
+                before = filter_args.get("before")
+                cursor = history_cursor
+                if cursor is None and before is not None:
+                    cursor = before + 1
+                raw = fetch_v1(last_time=cursor, count=50,
                                category=filter_args.get("category", ""))
+                if raw:
+                    next_cursor = min(it["ctime"] for it in raw)
+                    if cursor is not None and next_cursor >= cursor:
+                        raise RuntimeError("历史分页游标未前进，无法继续加载")
+                    history_cursor = next_cursor
+                    since = filter_args.get("since")
+                    history_exhausted = since is not None and next_cursor <= since
+                else:
+                    history_exhausted = True
                 fetched = do_filter(raw)
                 for it in fetched:
                     item_id = it.get("id")
@@ -606,7 +682,7 @@ def live_monitor(filter_args, interval=15, content_limit=1000):
 
             # 翻到底部再按下键时加载更多历史
             if (key in (curses.KEY_DOWN, ord('j'), curses.KEY_NPAGE)
-                    and scroll_pos >= max_scroll and max_scroll > 0):
+                    and scroll_pos >= max_scroll):
                 load_history()
 
             last_key = key
@@ -655,6 +731,14 @@ def main():
                               help="不显示关联股票信息")
     output_group.add_argument("--content-limit", type=int, default=1000,
                               help="正文最大显示字符数（默认 1000）")
+    output_group.add_argument("--download", action="store_true",
+                              help="下载模式：获取指定日期电报并保存为文件（必须配合 --date）")
+    output_group.add_argument("--archive", action="store_true",
+                              help="归档模式：同 --download，但按 年份/月份 目录层级存放")
+    output_group.add_argument("--format", choices=["plain", "markdown"], default="plain",
+                              help="下载模式内容风格（默认 plain：无标签/股票/等级标记）")
+    output_group.add_argument("--output-dir", default=".",
+                              help="下载模式输出目录（默认当前目录）")
 
     follow_group = parser.add_argument_group("实时模式")
     follow_group.add_argument("-f", "--follow", action="store_true",
@@ -663,6 +747,10 @@ def main():
                               help="监听刷新间隔秒数（默认 15）")
 
     args = parser.parse_args()
+
+    # 下载/归档模式必须指定日期
+    if (args.download or args.archive) and not args.date:
+        parser.error("--download/--archive 模式必须指定 --date YYYY-MM-DD")
 
     # 解析 --date 为本地时区的时间戳区间 [00:00:00, 23:59:59]
     date_since = None
@@ -675,6 +763,11 @@ def main():
         date_before = int((d + timedelta(days=1)).timestamp()) - 1
         args.since = max(args.since, date_since) if args.since is not None else date_since
         args.before = min(args.before, date_before) if args.before is not None else date_before
+
+    if args.count is not None and args.count <= 0:
+        parser.error("--count 必须大于 0")
+    if args.since is not None and args.before is not None and args.since > args.before:
+        parser.error("时间范围无交集：--since 不能晚于 --before")
 
     # 解析 category
     api_category = ""
@@ -696,27 +789,44 @@ def main():
 
     # 单次获取模式 - 使用 v1 API（自动分页）
     items = []
-    last_time = None
-    needed = args.count if args.count is not None else 20
-    if args.date and args.count is None:
-        needed = 10**9  # 未指定 -n 时取全天
-    max_rounds = 300 if args.date else max(needed // 20 + 2, 3)
+    seen_ids = set()
+    # API 返回游标之前的数据；+1 保留 --before 所在的整秒。
+    last_time = args.before + 1 if args.before is not None else None
+    needed = args.count if args.count is not None else (None if args.date else 20)
 
-    for _ in range(max_rounds):
+    while needed is None or len(items) < needed:
         raw = fetch_v1(last_time=last_time, count=20, category=api_category)
         if not raw:
             break
+        next_cursor = min(it["ctime"] for it in raw)
+        if last_time is not None and next_cursor >= last_time:
+            parser.exit(1, "分页游标未前进，获取未完成；未写入下载文件。\n")
         filtered = filter_items(raw, level=args.level, keyword=args.keyword,
                                 subject=args.subject, stock=args.stock,
                                 since=args.since, before=args.before)
-        items.extend(filtered)
-        if len(items) >= needed:
+        for item in filtered:
+            if item["id"] not in seen_ids:
+                items.append(item)
+                seen_ids.add(item["id"])
+        last_time = next_cursor
+        if args.since is not None and last_time <= args.since:
             break
-        last_time = raw[-1].get("ctime")
-        if date_since is not None and last_time < date_since:
-            break  # 已翻过指定日期起点，整天覆盖完毕
 
-    items = items[:needed]
+    if needed is not None:
+        items = items[:needed]
+
+    if args.download or args.archive:
+        if args.archive:
+            out_dir = os.path.join(args.output_dir, f"{d.year:04d}", f"{d.month:02d}")
+        else:
+            out_dir = args.output_dir
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, f"{args.date}.md")
+        with open(path, "w", encoding="utf-8") as fp:
+            fp.write(format_markdown(items, args.date, show_stock=not args.no_stock,
+                                     plain=(args.format == "plain")))
+        print(f"已保存 {len(items)} 条电报到 {path}")
+        return
 
     if args.json:
         format_json(items)

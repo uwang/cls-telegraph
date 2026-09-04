@@ -63,9 +63,21 @@ uv run cls-telegraph --since 1775140000 --before 1775145000
 uv run cls-telegraph --date 2026-09-01
 uv run cls-telegraph --date 2026-09-01 -n 50
 
+# 下载模式：将指定日期电报保存为 Markdown 文件（必须指定 --date）
+# 默认 plain 风格：无标签、无股票、无等级标记
+uv run cls-telegraph --download --date 2026-09-01
+# markdown 风格：含等级标记、话题标签、关联股票
+uv run cls-telegraph --download --date 2026-09-01 --format markdown
+uv run cls-telegraph --download --date 2026-09-01 --output-dir ./downloads
+
+# 归档模式：同下载，但按 年份/月份 目录层级存放（downloads/2026/09/2026-09-01.md）
+uv run cls-telegraph --archive --date 2026-09-01 --output-dir ./downloads
+
 # 组合使用
 uv run cls-telegraph -n 30 -c 港美股 -k "IPO" --json
 ```
+
+单次获取中的 `-n` 表示筛选后需要的条数。程序持续分页，直到数量满足、到达 `--since` 下界或接口返回空页；稀少关键词查询可能需要较长时间，可用 `--date` 或 `--since` 限定范围。日期查询直接从该日结束时间开始，`--since` / `--before` 包含对应秒。分页游标停滞时会报错退出，不写入下载文件。
 
 ### 实时监控模式
 
@@ -98,7 +110,9 @@ uv run cls-telegraph -f -k "原油"
 
 - 新电报到达时显示 `★ NEW` 标记并自动回到顶部
 - 在顶部按 `↑` 手动刷新
-- 滚到底部按 `↓` 自动加载更多历史
+- 滚到底部按 `↓` 自动加载更多历史；列表为空或不足一屏时同样可用
+- 历史游标按原始数据推进，没有匹配结果的页也可继续向前翻
+- 指定分类或时间上界时使用 v1 API 刷新，其余情况使用 nodeapi
 
 ### 完整参数
 
@@ -122,6 +136,11 @@ uv run cls-telegraph -h
   --json                 输出 JSON 格式
   --no-stock             不显示关联股票信息
   --content-limit N      正文最大显示字符数（默认 1000）
+  --download             下载模式：保存指定日期电报为 Markdown 文件（必须配合 --date）
+  --archive              归档模式：同 --download，但按 年份/月份 目录层级存放
+  --format {plain,markdown}
+                         下载模式内容风格（默认 plain：无标签/股票/等级标记）
+  --output-dir DIR       下载模式输出目录（默认当前目录）
 
 实时模式:
   -f, --follow           全屏实时监听新电报（q 退出）
@@ -158,6 +177,47 @@ uv run cls-telegraph -h
  📡 共 42 条 | 12s 后刷新 | ↑↓/jk翻页 /搜索 q退出
 ```
 
+## 开发验证
+
+```bash
+uv run python -m unittest discover -s tests -v
+```
+
+回归测试使用模拟接口和终端，覆盖日期边界、稀疏筛选、分页去重与停滞、实时分类、空列表历史加载，以及各输出格式的正文保留。
+
 ## License
 
 MIT
+
+## Docker 每日归档
+
+```bash
+docker compose up -d --build
+docker compose logs -f archive
+```
+
+默认北京时间（`Asia/Shanghai`）每天 **00:10** 归档前一天完整电报，保存到宿主机
+`/Users/bing/workspace/economic-crisis/raw/telegram/YYYY/MM/YYYY-MM-DD.md`。
+首次启动如果已过执行时间，立即归档昨天；否则等到 00:10。
+成功日期记录在输出目录的 `.archive-last-success`，重启后从该日期逐日补档。
+首次启动仅归档昨天，不自动扫描更早历史。失败每 5 分钟重试，单次任务最长 1 小时；
+下载成功后才替换目标文件。日志可通过 Compose 查看，Docker 会轮转日志。
+请保持 Docker 运行且电脑不休眠；停机期间不能执行，恢复后会依据成功记录补档。
+
+可在项目 `.env` 中自定义（不提交此文件）：
+
+```dotenv
+ARCHIVE_TIME=00:10
+ARCHIVE_OUTPUT_DIR=/Users/bing/workspace/economic-crisis/raw/telegram
+```
+
+修改后运行 `docker compose up -d`。停止服务用 `docker compose down`，归档文件保留。
+Linux 上需要以宿主机用户写入时，可在服务中增加 `user: "1000:1000"` 并确保输出目录可写。
+
+手动归档指定日期（不改变每日任务的成功记录）：
+
+```bash
+docker compose run --rm archive --archive --date 2026-08-30 --output-dir /data
+```
+
+其他 CLI 参数也可直接使用，例如 `docker compose run --rm archive -h`。
