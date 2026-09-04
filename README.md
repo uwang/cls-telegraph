@@ -12,13 +12,15 @@
 
 ## 安装
 
+需要 [uv](https://docs.astral.sh/uv/)。克隆后 `uv sync` 会自动创建虚拟环境、安装依赖并生成 `uv.lock`：
+
 ```bash
 git clone https://github.com/InphinitiZ/cls-telegraph.git
 cd cls-telegraph
-pip install -r requirements.txt
+uv sync
 ```
 
-依赖：Python 3.8+，`requests`
+依赖：Python 3.8+，`requests`（由 uv 自动管理）
 
 ## 用法
 
@@ -26,54 +28,58 @@ pip install -r requirements.txt
 
 ```bash
 # 获取最新 20 条
-python cls_telegraph.py
+uv run cls-telegraph
 
 # 获取 50 条
-python cls_telegraph.py -n 50
+uv run cls-telegraph -n 50
 
 # JSON 输出（可管道到 jq）
-python cls_telegraph.py -n 10 --json
+uv run cls-telegraph -n 10 --json
 ```
 
 ### 筛选
 
 ```bash
 # 按等级：A(加红/重大) B(重要) C(普通)
-python cls_telegraph.py -l A
+uv run cls-telegraph -l A
 
 # 按服务端分类
-python cls_telegraph.py -c 加红
-python cls_telegraph.py -c 港美股
+uv run cls-telegraph -c 加红
+uv run cls-telegraph -c 港美股
 
 # 按关键词搜索（匹配标题和内容）
-python cls_telegraph.py -k "原油"
+uv run cls-telegraph -k "原油"
 
 # 按话题
-python cls_telegraph.py -s "港股"
+uv run cls-telegraph -s "港股"
 
 # 按关联股票（代码或名称）
-python cls_telegraph.py --stock "ST西发"
+uv run cls-telegraph --stock "ST西发"
 
 # 指定时间范围（Unix 时间戳）
-python cls_telegraph.py --since 1775140000 --before 1775145000
+uv run cls-telegraph --since 1775140000 --before 1775145000
+
+# 获取指定日期全天电报（默认取全天，可用 -n 截断）
+uv run cls-telegraph --date 2026-09-01
+uv run cls-telegraph --date 2026-09-01 -n 50
 
 # 组合使用
-python cls_telegraph.py -n 30 -c 港美股 -k "IPO" --json
+uv run cls-telegraph -n 30 -c 港美股 -k "IPO" --json
 ```
 
 ### 实时监控模式
 
 ```bash
 # 全屏监控，默认 15 秒刷新
-python cls_telegraph.py -f
+uv run cls-telegraph -f
 
 # 自定义刷新间隔
-python cls_telegraph.py -f --interval 10
+uv run cls-telegraph -f --interval 10
 
 # 带筛选的监控
-python cls_telegraph.py -f -l B
-python cls_telegraph.py -f -c 加红
-python cls_telegraph.py -f -k "原油"
+uv run cls-telegraph -f -l B
+uv run cls-telegraph -f -c 加红
+uv run cls-telegraph -f -k "原油"
 ```
 
 **实时模式操作：**
@@ -97,10 +103,11 @@ python cls_telegraph.py -f -k "原油"
 ### 完整参数
 
 ```
-python cls_telegraph.py -h
+uv run cls-telegraph -h
 
 获取控制:
-  -n, --count N          获取条数（默认 20）
+  -n, --count N          获取条数（默认 20；--date 模式下默认取全天）
+  --date YYYY-MM-DD      获取指定日期（本地时区）的电报
   --since TIMESTAMP      获取该 Unix 时间戳之后的电报
   --before TIMESTAMP     获取该 Unix 时间戳之前的电报
 

@@ -7,14 +7,15 @@
 ```
 cls/
   cls_telegraph.py    # 单文件 CLI，包含所有逻辑
-  requirements.txt    # 依赖: requests
+  pyproject.toml      # 项目元数据与依赖（uv 管理）
+  uv.lock             # 依赖锁定文件
 ```
 
 ## 运行
 
 ```bash
-pip install -r requirements.txt
-python cls_telegraph.py -h
+uv sync                    # 创建 .venv 并安装依赖
+uv run cls-telegraph -h    # 或 uv run cls_telegraph.py
 ```
 
 ## API 体系

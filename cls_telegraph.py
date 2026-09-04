@@ -8,7 +8,7 @@ import json
 import sys
 import time as _time
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 
@@ -630,8 +630,10 @@ def main():
     )
 
     fetch_group = parser.add_argument_group("获取控制")
-    fetch_group.add_argument("-n", "--count", type=int, default=20,
-                             help="获取条数（默认 20）")
+    fetch_group.add_argument("-n", "--count", type=int, default=None,
+                             help="获取条数（默认 20；--date 模式下默认取全天）")
+    fetch_group.add_argument("--date", metavar="YYYY-MM-DD",
+                             help="获取指定日期（本地时区）的电报")
     fetch_group.add_argument("--since", type=int, default=None,
                              help="获取该 Unix 时间戳之后的电报")
     fetch_group.add_argument("--before", type=int, default=None,
@@ -662,6 +664,18 @@ def main():
 
     args = parser.parse_args()
 
+    # 解析 --date 为本地时区的时间戳区间 [00:00:00, 23:59:59]
+    date_since = None
+    if args.date:
+        try:
+            d = datetime.strptime(args.date, "%Y-%m-%d")
+        except ValueError:
+            parser.error("--date 格式应为 YYYY-MM-DD，例如 2026-09-01")
+        date_since = int(d.timestamp())
+        date_before = int((d + timedelta(days=1)).timestamp()) - 1
+        args.since = max(args.since, date_since) if args.since is not None else date_since
+        args.before = min(args.before, date_before) if args.before is not None else date_before
+
     # 解析 category
     api_category = ""
     if args.category:
@@ -683,8 +697,10 @@ def main():
     # 单次获取模式 - 使用 v1 API（自动分页）
     items = []
     last_time = None
-    needed = args.count
-    max_rounds = max(needed // 20 + 2, 3)  # 足够的轮次
+    needed = args.count if args.count is not None else 20
+    if args.date and args.count is None:
+        needed = 10**9  # 未指定 -n 时取全天
+    max_rounds = 300 if args.date else max(needed // 20 + 2, 3)
 
     for _ in range(max_rounds):
         raw = fetch_v1(last_time=last_time, count=20, category=api_category)
@@ -697,6 +713,8 @@ def main():
         if len(items) >= needed:
             break
         last_time = raw[-1].get("ctime")
+        if date_since is not None and last_time < date_since:
+            break  # 已翻过指定日期起点，整天覆盖完毕
 
     items = items[:needed]
 
