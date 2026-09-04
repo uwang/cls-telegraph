@@ -1,7 +1,5 @@
-import importlib.util
 import os
 import tempfile
-import threading
 import unittest
 from datetime import date
 from pathlib import Path
@@ -10,10 +8,8 @@ from unittest.mock import Mock, patch
 import requests
 import cls_telegraph as cli
 
-spec = importlib.util.spec_from_file_location('archive_state',
-    Path(__file__).resolve().parents[1] / 'docker/archive_state.py')
-state = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(state)
+from archive import storage as state
+from archive import bark
 
 
 class StateTests(unittest.TestCase):
@@ -23,7 +19,7 @@ class StateTests(unittest.TestCase):
         self.path = Path(self.tmp.name) / 'archive.sqlite3'
         self.db = state.connect(self.path)
         self.addCleanup(lambda: self.db.close())
-        self.devices = {state.device_id(k): k for k in ('secret-device-one', 'secret-device-two')}
+        self.devices = {bark.device_id(k): k for k in ('secret-device-one', 'secret-device-two')}
         self.stopped = Mock()
         self.stopped.is_set.return_value = False
         self.stopped.wait.return_value = False
@@ -37,30 +33,30 @@ class StateTests(unittest.TestCase):
         ok = Mock(status_code=200)
         ok.json.return_value = {'code': 200}
         bad = Mock(status_code=503)
-        with patch.object(state.SESSION, 'post', side_effect=[ok, bad, bad, bad, bad]) as send:
-            state.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped, 0)
+        with patch.object(bark.SESSION, 'post', side_effect=[ok, bad, bad, bad, bad]) as send:
+            bark.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped, 0)
         self.assertEqual(send.call_count, 5)
         self.db.close()
         self.db = state.connect(self.path)
-        with patch.object(state.SESSION, 'post', return_value=ok) as send:
-            state.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped)
+        with patch.object(bark.SESSION, 'post', return_value=ok) as send:
+            bark.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped)
         self.assertEqual(send.call_count, 1)
         self.assertEqual(send.call_args.kwargs['json']['device_key'], 'secret-device-two')
         self.assertEqual(self.db.execute('SELECT status FROM notifications').fetchone()[0], 'success')
-        with patch.object(state.SESSION, 'post') as send:
-            state.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped)
+        with patch.object(bark.SESSION, 'post') as send:
+            bark.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped)
             send.assert_not_called()
 
     def test_invalid_response_and_secret_exception_are_not_success(self):
         self.queue()
         bad = Mock(status_code=200)
         bad.json.return_value = {'code': 400}
-        with patch.object(state.SESSION, 'post', side_effect=[bad, requests.ConnectionError('secret-device-one')] * 4):
-            state.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped)
+        with patch.object(bark.SESSION, 'post', side_effect=[bad, requests.ConnectionError('secret-device-one')] * 4):
+            bark.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped)
         self.assertEqual(self.db.execute("SELECT count(*) FROM push_log WHERE status='failed'").fetchone()[0], 8)
         self.assertNotIn('secret-device', '\n'.join(self.db.iterdump()))
-        with patch.object(state.SESSION, 'post') as send:
-            state.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped)
+        with patch.object(bark.SESSION, 'post') as send:
+            bark.deliver_pending(self.db, 'https://api.day.app/push', self.devices, self.stopped)
             send.assert_not_called()  # Cross-cycle backoff is persisted.
 
     def test_archive_failure_dedup_and_recovery_transaction(self):
@@ -83,8 +79,8 @@ class StateTests(unittest.TestCase):
             state.notify(self.db, '2026-08-30', 'success', 'test', {})
         self.assertEqual(self.db.execute('SELECT status FROM notifications').fetchone()[0], 'disabled')
         with self.assertRaises(ValueError):
-            state.bark_config({'BARK_URL': 'https://api.day.app/secret', 'BARK_DEVICE_KEYS': 'secret'})
-        _, keys = state.bark_config({'BARK_DEVICE_KEYS': 'one,one,two'})
+            bark.bark_config({'BARK_URL': 'https://api.day.app/secret', 'BARK_DEVICE_KEYS': 'secret'})
+        _, keys = bark.bark_config({'BARK_DEVICE_KEYS': 'one,one,two'})
         self.assertEqual(len(keys), 2)
 
 

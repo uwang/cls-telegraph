@@ -17,7 +17,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-include = ["cls_telegraph.py"]
+include = ["cls_telegraph.py", "archive/**/*.py"]
 
 [[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple/"

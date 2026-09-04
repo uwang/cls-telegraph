@@ -5,10 +5,19 @@
 ## 项目结构
 
 ```
-cls/
-  cls_telegraph.py    # 单文件 CLI，包含所有逻辑
-  pyproject.toml      # 项目元数据与依赖（uv 管理）
-  uv.lock             # 依赖锁定文件
+cls-telegraph/
+  cls_telegraph.py    # 单文件 CLI：抓取、筛选与输出
+  archive/
+    __init__.py
+    scheduler.py     # 每日归档调度与补档；入口 python -m archive.scheduler
+    storage.py       # SQLite 记录与通知队列
+    bark.py          # Bark 请求与重试
+  tests/
+  Dockerfile
+  compose.yaml
+  run-local.sh
+  pyproject.toml     # 项目元数据与依赖（uv 管理）
+  uv.lock            # 依赖锁定文件
 ```
 
 ## 运行

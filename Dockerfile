@@ -7,6 +7,6 @@ ENV TZ=Asia/Shanghai \
     PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md cls_telegraph.py ./
+COPY archive/ ./archive/
 RUN uv sync --frozen --no-dev --no-editable
-COPY docker/archive_scheduler.py docker/archive_state.py /app/
-ENTRYPOINT ["python", "/app/archive_scheduler.py"]
+ENTRYPOINT ["python", "-m", "archive.scheduler"]

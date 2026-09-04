@@ -1,4 +1,3 @@
-import importlib.util
 import subprocess
 import tempfile
 import unittest
@@ -6,10 +5,7 @@ from datetime import date, datetime, time
 from pathlib import Path
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location(
-    "archive_scheduler", Path(__file__).resolve().parents[1] / "docker/archive_scheduler.py")
-scheduler = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(scheduler)
+from archive import scheduler
 
 
 class ArchiveSchedulerTests(unittest.TestCase):

@@ -4,6 +4,5 @@
 !uv.lock
 !README.md
 !cls_telegraph.py
-!docker/
-!docker/archive_scheduler.py
-!docker/archive_state.py
+!archive/
+!archive/*.py

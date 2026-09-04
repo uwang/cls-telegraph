@@ -11,6 +11,9 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from .bark import bark_config, deliver_pending
+from .storage import connect, finish_archive, show_status, start_archive
+
 
 def latest_due(now, scheduled):
     return now.date() - timedelta(days=1 if now.time() >= scheduled else 2)
@@ -32,9 +35,6 @@ def archive(day, output):
 
 
 def main():
-    from archive_state import (bark_config, connect, deliver_pending, finish_archive,
-                               show_status, start_archive)
-
     if len(sys.argv) > 1 and sys.argv[1:] != ["--status"]:
         os.execvp("cls-telegraph", ["cls-telegraph", *sys.argv[1:]])
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

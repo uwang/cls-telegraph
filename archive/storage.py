@@ -1,32 +1,7 @@
-"""Persistent archive history and per-device Bark outbox (no device secrets on disk)."""
-import hashlib
+"""SQLite archive history and persistent notification outbox."""
 import json
-import logging
-import random
 import sqlite3
 import time
-from urllib.parse import urlsplit
-
-import requests
-
-LOG = logging.getLogger(__name__)
-SESSION = requests.Session()
-BACKOFF = ((2, 4), (6, 10), (15, 25))
-
-
-def device_id(key):
-    return hashlib.sha256(key.encode()).hexdigest()
-
-
-def bark_config(environ):
-    keys = list(dict.fromkeys(k.strip() for k in environ.get('BARK_DEVICE_KEYS', '').split(',') if k.strip()))
-    base = environ.get('BARK_URL', 'https://api.day.app').strip().rstrip('/')
-    parsed = urlsplit(base)
-    if keys and (parsed.scheme not in ('http', 'https') or not parsed.netloc
-                 or parsed.username or parsed.password or parsed.query or parsed.fragment
-                 or parsed.path not in ('', '/')):
-        raise ValueError('BARK_URL 必须是服务基础地址，不包含设备 key、路径或查询参数')
-    return base + '/push', {device_id(k): k for k in keys}
 
 
 def connect(path):
@@ -94,52 +69,27 @@ def finish_archive(db, attempt, day, devices, path=None, error=None):
         notify(db, day, 'failure' if error else 'success', body, devices)
 
 
-def deliver_pending(db, endpoint, devices, stopped, retry_seconds=900):
-    rows = db.execute("SELECT d.*,n.title,n.body FROM deliveries d JOIN notifications n ON n.id=d.notification_id "
-                      "WHERE d.status='pending' AND d.next_attempt<=? ORDER BY n.id", (time.time(),)).fetchall()
-    for row in rows:
-        key = devices.get(row['device_id'])
-        if stopped.is_set():
-            return
-        if key is None:
-            continue  # Preserve pending state if configuration temporarily drops a device.
-        for attempt in range(4):
-            started = time.time()
-            reason = None
-            try:
-                response = SESSION.post(endpoint, json={'device_key': key, 'title': row['title'],
-                                        'body': row['body'], 'group': 'cls.archive'}, timeout=(5, 15))
-                if response.status_code != 200:
-                    reason = f'HTTP {response.status_code}'
-                else:
-                    payload = response.json()
-                    if not isinstance(payload, dict) or payload.get('code') != 200:
-                        reason = 'Bark 业务状态非 200'
-            except (requests.RequestException, ValueError) as exc:
-                # Never persist exception text: URLs, response bodies and proxy credentials may contain secrets.
-                reason = type(exc).__name__
-            elapsed = time.time() - started
-            with db:
-                db.execute('INSERT INTO push_log(notification_id,device_id,attempted_at,elapsed,status,error) VALUES(?,?,?,?,?,?)',
-                           (row['notification_id'], row['device_id'], started, elapsed,
-                            'failed' if reason else 'success', reason))
-                db.execute('UPDATE deliveries SET status=?,next_attempt=? WHERE notification_id=? AND device_id=?',
-                           ('pending' if reason else 'success', time.time() + retry_seconds,
-                            row['notification_id'], row['device_id']))
-                if not reason:
-                    db.execute("UPDATE notifications SET status='success' WHERE id=? AND NOT EXISTS "
-                               "(SELECT 1 FROM deliveries WHERE notification_id=? AND status!='success')",
-                               (row['notification_id'], row['notification_id']))
-            LOG.info('Bark notification=%s device=%s attempt=%s elapsed=%.2fs result=%s',
-                     row['notification_id'], row['device_id'][:12], attempt + 1, elapsed, reason or 'success')
-            if not reason:
-                break
-            if attempt < 3 and stopped.wait(random.uniform(*BACKOFF[attempt])):
-                return
-
-
 def show_status(db):
     for table in ('archive_log', 'notifications', 'deliveries', 'push_log'):
         order = 'notification_id DESC' if table == 'deliveries' else 'id DESC'
         rows = db.execute(f'SELECT * FROM {table} ORDER BY {order} LIMIT 20').fetchall()
         print(json.dumps({table: [dict(r) for r in rows]}, ensure_ascii=False, indent=2))
+
+
+def pending_deliveries(db):
+    return db.execute("SELECT d.*,n.title,n.body FROM deliveries d JOIN notifications n ON n.id=d.notification_id "
+                      "WHERE d.status='pending' AND d.next_attempt<=? ORDER BY n.id", (time.time(),)).fetchall()
+
+
+def record_push_result(db, notification_id, device, started, elapsed, reason, retry_seconds):
+    with db:
+        db.execute('INSERT INTO push_log(notification_id,device_id,attempted_at,elapsed,status,error) VALUES(?,?,?,?,?,?)',
+                   (notification_id, device, started, elapsed,
+                    'failed' if reason else 'success', reason))
+        db.execute('UPDATE deliveries SET status=?,next_attempt=? WHERE notification_id=? AND device_id=?',
+                   ('pending' if reason else 'success', time.time() + retry_seconds,
+                    notification_id, device))
+        if not reason:
+            db.execute("UPDATE notifications SET status='success' WHERE id=? AND NOT EXISTS "
+                       "(SELECT 1 FROM deliveries WHERE notification_id=? AND status!='success')",
+                       (notification_id, notification_id))

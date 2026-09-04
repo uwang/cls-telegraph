@@ -177,6 +177,29 @@ uv run cls-telegraph -h
  📡 共 42 条 | 12s 后刷新 | ↑↓/jk翻页 /搜索 q退出
 ```
 
+## 项目结构
+
+```text
+cls-telegraph/
+├── cls_telegraph.py       # 单文件 CLI：抓取、筛选与输出
+├── archive/
+│   ├── __init__.py
+│   ├── scheduler.py      # 每日调度、补档与归档文件写入
+│   ├── storage.py        # SQLite 归档记录、通知队列与推送记录
+│   └── bark.py           # Bark 配置、HTTP 请求与按设备重试
+├── tests/
+├── Dockerfile
+├── compose.yaml
+├── run-local.sh
+├── .env.example
+├── pyproject.toml
+└── README.md
+```
+
+Docker 通过 `python -m archive.scheduler` 启动。归档模块随项目一起打包；
+本地也可运行 `OUTPUT_DIR=./downloads uv run python -m archive.scheduler --status` 查看记录。
+调度模块需要 Python 3.9+（使用标准库 `zoneinfo`），Docker 使用 Python 3.12。
+
 ## 开发验证
 
 ```bash
