@@ -29,10 +29,9 @@ def connect(path):
     return db
 
 
-def notify(db, day, kind, body, devices):
+def notify(db, day, kind, title, body, devices):
     cursor = db.execute('INSERT OR IGNORE INTO notifications(date,kind,title,body,created_at,status) VALUES(?,?,?,?,?,?)',
-                        (str(day), kind, '财联社电报归档' + ('成功' if kind == 'success' else '失败'),
-                         body, time.time(), 'pending' if devices else 'disabled'))
+                        (str(day), kind, title, body, time.time(), 'pending' if devices else 'disabled'))
     if cursor.rowcount:
         db.executemany('INSERT INTO deliveries(notification_id,device_id,status) VALUES(?,?,?)',
                        [(cursor.lastrowid, device, 'pending') for device in devices])
@@ -64,9 +63,11 @@ def finish_archive(db, attempt, day, devices, path=None, error=None):
             db.execute("UPDATE deliveries SET status='superseded' WHERE status='pending' AND notification_id IN "
                        "(SELECT id FROM notifications WHERE date=? AND kind='failure')", (str(day),))
             db.execute("UPDATE notifications SET status='superseded' WHERE date=? AND kind='failure' AND status='pending'", (str(day),))
-        body = (f'{day} 归档失败：{error}；将自动重试。' if error else
-                f'{day} 已归档，{count if count is not None else "未知"} 条，{size} 字节。\n{path}')
-        notify(db, day, 'failure' if error else 'success', body, devices)
+        if error:
+            title, body = '财联社电报归档失败', f'{day} 归档失败：{error}；将自动重试。'
+        else:
+            title, body = f'财联社{day} 已归档电报 {count if count is not None else "未知"} 条', ''
+        notify(db, day, 'failure' if error else 'success', title, body, devices)
 
 
 def show_status(db):

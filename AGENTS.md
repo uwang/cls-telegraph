@@ -12,7 +12,10 @@ cls-telegraph/
     scheduler.py     # 每日归档调度与补档；入口 python -m archive.scheduler
     storage.py       # SQLite 记录与通知队列
     bark.py          # Bark 请求与重试
-  tests/
+  tests/               # unittest 测试（无需额外依赖）
+    test_regressions.py       # CLI 回归：分页游标、正文完整性、下载/归档输出
+    test_archive_state.py     # 归档状态：SQLite 记录、Bark 推送重试、消息格式
+    test_archive_scheduler.py # 调度器：每日归档触发与补档逻辑
   Dockerfile
   compose.yaml
   run-local.sh
@@ -25,6 +28,12 @@ cls-telegraph/
 ```bash
 uv sync                    # 创建 .venv 并安装依赖
 uv run cls-telegraph -h    # 或 uv run cls_telegraph.py
+```
+
+## 测试
+
+```bash
+uv run python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 ## API 体系

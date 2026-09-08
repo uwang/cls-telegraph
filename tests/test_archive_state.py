@@ -26,7 +26,7 @@ class StateTests(unittest.TestCase):
 
     def queue(self):
         with self.db:
-            state.notify(self.db, '2026-08-30', 'success', 'test', self.devices)
+            state.notify(self.db, '2026-08-30', 'success', 'test', '', self.devices)
 
     def test_partial_delivery_survives_restart_and_only_retries_failed_device(self):
         self.queue()
@@ -73,10 +73,13 @@ class StateTests(unittest.TestCase):
         self.assertEqual(self.db.execute('SELECT item_count FROM archive_log WHERE id=?', (attempt,)).fetchone()[0], 123)
         self.assertEqual(self.db.execute("SELECT status FROM notifications WHERE kind='failure'").fetchone()[0], 'superseded')
         self.assertEqual(self.db.execute("SELECT count(*) FROM deliveries WHERE status='pending'").fetchone()[0], 2)
+        title, body = self.db.execute("SELECT title,body FROM notifications WHERE kind='success'").fetchone()
+        self.assertEqual(title, '财联社2026-08-30 已归档电报 123 条')
+        self.assertEqual(body, '')
 
     def test_disabled_bark_and_config_validation(self):
         with self.db:
-            state.notify(self.db, '2026-08-30', 'success', 'test', {})
+            state.notify(self.db, '2026-08-30', 'success', 'test', '', {})
         self.assertEqual(self.db.execute('SELECT status FROM notifications').fetchone()[0], 'disabled')
         with self.assertRaises(ValueError):
             bark.bark_config({'BARK_URL': 'https://api.day.app/secret', 'BARK_DEVICE_KEYS': 'secret'})

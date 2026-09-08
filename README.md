@@ -22,6 +22,22 @@ uv sync
 
 依赖：Python 3.8+，`requests`（由 uv 自动管理）
 
+## 测试
+
+使用 Python 内置 `unittest`（无需额外安装）：
+
+```bash
+uv run python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+测试覆盖：
+
+| 文件 | 内容 |
+|------|------|
+| `tests/test_regressions.py` | CLI 回归：分页游标、正文完整性、下载/归档输出 |
+| `tests/test_archive_state.py` | 归档状态：SQLite 记录、Bark 推送重试、消息格式 |
+| `tests/test_archive_scheduler.py` | 调度器：每日归档触发与补档逻辑 |
+
 ## 用法
 
 ### 基础获取
