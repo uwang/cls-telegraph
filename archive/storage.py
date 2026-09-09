@@ -66,7 +66,7 @@ def finish_archive(db, attempt, day, devices, path=None, error=None):
         if error:
             title, body = '财联社电报归档失败', f'{day} 归档失败：{error}；将自动重试。'
         else:
-            title, body = f'财联社{day} 已归档电报 {count if count is not None else "未知"} 条', ''
+            title, body = f'财联社{day}', f'已归档电报 {count if count is not None else "未知"} 条'
         notify(db, day, 'failure' if error else 'success', title, body, devices)
 
 

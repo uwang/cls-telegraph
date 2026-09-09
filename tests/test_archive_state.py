@@ -74,8 +74,8 @@ class StateTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT status FROM notifications WHERE kind='failure'").fetchone()[0], 'superseded')
         self.assertEqual(self.db.execute("SELECT count(*) FROM deliveries WHERE status='pending'").fetchone()[0], 2)
         title, body = self.db.execute("SELECT title,body FROM notifications WHERE kind='success'").fetchone()
-        self.assertEqual(title, '财联社2026-08-30 已归档电报 123 条')
-        self.assertEqual(body, '')
+        self.assertEqual(title, '财联社2026-08-30')
+        self.assertEqual(body, '已归档电报 123 条')
 
     def test_disabled_bark_and_config_validation(self):
         with self.db:
